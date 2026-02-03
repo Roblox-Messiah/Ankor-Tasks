@@ -57,7 +57,7 @@
       #breathe-panel { width: 90%; height: 80%; }
       #customize-panel { width: 85%; max-width: 320px; text-align: center; } 
       #encouragement-modal { width: 85%; max-width: 320px; text-align: center; z-index: 5000; } 
-      #lost-tracking-modal { width: 85%; max-width: 320px; text-align: center; }
+      #lost-tracking-modal { width: 85%; max-width: 320px; text-align: center; z-index: 6000; }
       #make-card-panel { width: 85%; max-width: 320px; text-align: center; }
 
       h3 { text-align: center; margin-top: 0; color: var(--nook-green); font-size: 22px; border-bottom: 2px dashed #e0d6c3; padding-bottom: 10px; }
@@ -85,7 +85,6 @@
       #breathe-btn { position: absolute; bottom: 30px; left: 30px; z-index: 1000; padding: 15px 20px; border-radius: 30px; background: var(--nook-pink); color: white; border: 4px solid white; font-size: 16px; font-weight: bold; box-shadow: 0 4px 0 var(--nook-pink-dark); cursor: pointer; }
       #list-btn { position: absolute; top: 30px; right: 30px; z-index: 1000; padding: 10px 15px; border-radius: 20px; background: var(--nook-blue); color: white; border: 3px solid white; font-size: 14px; font-weight: bold; box-shadow: 0 4px 0 #4a9d91; cursor: pointer; }
       #customize-btn { position: absolute; top: 30px; left: 30px; z-index: 1000; padding: 10px 15px; border-radius: 20px; background: var(--nook-blue); color: white; border: 3px solid white; font-size: 14px; font-weight: bold; box-shadow: 0 4px 0 var(--nook-blue-dark); cursor: pointer; }
-
       #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; padding: 15px 30px; background: var(--nook-blue); color: white; font-family: 'Varela Round', sans-serif; font-size: 18px; border: none; border-radius: 20px; box-shadow: 0 5px 0 #4a9d91; cursor: pointer; }
 
       /* List Styles */
@@ -99,6 +98,7 @@
       .breathe-item { background: #fdf0f5; padding: 20px; border-radius: 15px; margin-bottom: 15px; color: #d48bb3; font-weight: bold; text-align: center; border: 2px dashed #f5cdda; }
 
       #debug-log { position: absolute; top: 10px; left: 10px; color: red; background: rgba(255,255,255,0.8); padding: 5px; z-index: 10000; font-family: monospace; font-size: 10px; pointer-events: none; border-radius: 5px; }
+      
       .urgency-container { display: flex; justify-content: space-between; margin-top: 5px; }
       .urgency-option { cursor: pointer; padding: 8px 5px; border-radius: 15px; border: 2px solid #eee; background: white; flex: 1; text-align: center; margin: 0 3px; font-size: 20px; }
       .urgency-option.selected-chill { background: #d8f3dc; border-color: #95d5b2; }
@@ -268,8 +268,8 @@
       let myTasks = []; 
       let selectedUrgency = 'chill'; 
       
-      let lastSeenTime = 0; 
-      let isTrackingLost = false;
+      // -- NEW TRACKING SYSTEM VARIABLES --
+      let secondsWithoutTarget = 0; // Simple counter
       let visibleCount = 0;
       let cameraActive = false;
       let isModalOpen = false;
@@ -284,7 +284,7 @@
       const taskDueInput = document.getElementById('task-due');
       const taskTimeInput = document.getElementById('task-time');
 
-      // --- 1. START CAMERA ---
+      // --- 1. START CAMERA & HEARTBEAT ---
       startBtn.addEventListener('click', () => {
         debugLog.innerText = "Status: Starting Ankor Tasks...";
         startBtn.style.display = 'none'; 
@@ -293,8 +293,8 @@
           .then(() => { 
              debugLog.innerText = "Status: Ankor Tasks Active"; 
              cameraActive = true; 
-             lastSeenTime = Date.now();
-             startHeartbeat(); // Start the 1-second checker
+             // Start the 1-second counting loop immediately
+             setInterval(trackingHeartbeat, 1000);
           })
           .catch(err => { 
              console.error(err); alert("Camera Error: " + err); 
@@ -302,39 +302,38 @@
           });
       });
 
-      // --- 2. HEARTBEAT TRACKING LOGIC ---
-      function startHeartbeat() {
-          setInterval(() => {
-              if(!cameraActive) return;
-              if(isModalOpen) {
-                  lastSeenTime = Date.now(); // Reset timer if user is in a menu
-                  return; 
-              }
-              
-              const now = Date.now();
-              const timeSinceSeen = (now - lastSeenTime) / 1000;
+      // --- 2. THE NEW TRACKING HEARTBEAT ---
+      function trackingHeartbeat() {
+          // A. If camera is off or menu is open, reset logic
+          if (!cameraActive) return;
+          if (isModalOpen) {
+              secondsWithoutTarget = 0;
+              debugLog.innerText = "Status: Paused (Menu Open)";
+              return;
+          }
 
-              if(visibleCount > 0) {
-                  lastSeenTime = now;
-                  if(isTrackingLost) {
-                      isTrackingLost = false;
-                      closeModal('lost-tracking-modal');
-                  }
-                  debugLog.innerText = "Status: Tracking Active";
-              } else {
-                  debugLog.innerText = `Status: Searching (${Math.floor(timeSinceSeen)}s)...`;
-                  
-                  if(timeSinceSeen > 15 && !isTrackingLost) {
-                      isTrackingLost = true;
-                      openModal('lost-tracking-modal');
-                  }
+          // B. Check Visibility
+          if (visibleCount > 0) {
+              // Target is visible! Reset counter.
+              secondsWithoutTarget = 0;
+              debugLog.innerText = "Status: Target Found!";
+              // Close the modal if it's open (rare case)
+              document.getElementById('lost-tracking-modal').style.display = 'none';
+          } else {
+              // Target is lost! Count up.
+              secondsWithoutTarget++;
+              debugLog.innerText = `Status: Searching... (${secondsWithoutTarget}s)`;
+              
+              // Trigger at 15
+              if (secondsWithoutTarget >= 15) {
+                  openModal('lost-tracking-modal');
+                  secondsWithoutTarget = 0; // Reset so it doesn't loop
               }
-          }, 1000);
+          }
       }
 
       function resetTrackingLogic() {
-         isTrackingLost = false;
-         lastSeenTime = Date.now();
+         secondsWithoutTarget = 0;
          closeModal('lost-tracking-modal');
       }
 
@@ -394,8 +393,7 @@
       
       function closeModal(id) { 
           document.getElementById(id).style.display = 'none'; 
-          // Delay resetting isModalOpen slightly to prevent instant-trigger of lost tracking
-          setTimeout(() => { isModalOpen = false; lastSeenTime = Date.now(); }, 100);
+          isModalOpen = false;
       }
 
       function openTaskList() {
